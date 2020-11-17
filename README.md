@@ -4,9 +4,9 @@ This extension allows Sqlite3 to perform a breadth first search queries against 
 
 **Can't you do this with recursive common table expressions (RCTEs)?**
 
-Yes, but in practice RCTEs become extremely very slow for non-tree graphs.
+Yes, but in practice RCTEs are very slow for non-tree graphs.
 
-**How does it work**
+**How does it work?**
 
 This extension defines a virtual table called `bfsvtab`.
 The virtual table requires 4 SQL constraints to be set:
