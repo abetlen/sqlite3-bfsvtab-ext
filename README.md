@@ -23,7 +23,7 @@ The virtual table also provides the following columns that can be returned or us
 
 Check out the examples below for more details.
 
-## Build from source
+## Build From Source
 
 ```bash
 $ git clone git@github.com:abetlen/sqlite3-bfsvtab-ext.git
