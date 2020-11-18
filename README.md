@@ -1,6 +1,6 @@
-# bfsvtab: Breadth First Search Virtual Table Extension for Sqlite3
+# bfsvtab: A virtual table extension for breadth-first search queries in Sqlite3
 
-This extension allows Sqlite3 to perform breadth first search queries against graph data.
+This extension allows Sqlite3 to perform breadth-first search queries against graph data.
 
 **Can't you do this with recursive common table expressions (RCTEs)?**
 
@@ -14,7 +14,7 @@ The virtual table requires 4 SQL constraints to be set for all queries:
 - `tablename`: The name of the table or view which contains the graph edges (can be any table or view in the database).
 - `fromcolumn`: The node id column where an edge starts from (must be integer).
 - `tocolumn`: The node id column where an edge goes to (must be integer).
-- `root`: The root node id of the breadth first traversal.
+- `root`: The root node id of the breadth-first traversal.
 
 The virtual table also provides the following columns that can be returned or used as contraints:
 - `id`: The id of the current node being visited.
