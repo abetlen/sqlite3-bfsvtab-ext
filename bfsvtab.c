@@ -600,24 +600,12 @@ static int bfsvtabNext(sqlite3_vtab_cursor *cur) {
     int rc;
     bfsvtab_avl *newAvlNode;
     bfsvtab_cursor *pCur = (bfsvtab_cursor*)cur;
+    if (pCur->pCurrent) {
+        sqlite3_free(pCur->pCurrent);
+    }
     pCur->pCurrent = queuePull(&pCur->pQueue);
     if (pCur->pCurrent == 0) {
         return SQLITE_OK;
-    }
-    newAvlNode = sqlite3_malloc(sizeof(*newAvlNode));
-    if (newAvlNode == 0) {
-        return SQLITE_NOMEM;
-    }
-    memset(newAvlNode, 0, sizeof(*newAvlNode));
-    newAvlNode->id = pCur->pCurrent->id;
-    bfsvtabAvlInsert(&pCur->pVisited, newAvlNode);
-    rc = sqlite3_clear_bindings(pCur->pStmt);
-    if (rc) {
-        return rc;
-    }
-    rc = sqlite3_reset(pCur->pStmt);
-    if (rc) {
-        return rc;
     }
     rc = sqlite3_bind_int64(pCur->pStmt, 1, pCur->pCurrent->id);
     if (rc) {
@@ -647,6 +635,14 @@ static int bfsvtabNext(sqlite3_vtab_cursor *cur) {
             newAvlNode->id = iNew;
             bfsvtabAvlInsert(&pCur->pVisited, newAvlNode);
         }
+    }
+    rc = sqlite3_clear_bindings(pCur->pStmt);
+    if (rc) {
+        return rc;
+    }
+    rc = sqlite3_reset(pCur->pStmt);
+    if (rc) {
+        return rc;
     }
     return rc;
 }
@@ -739,6 +735,7 @@ static int bfsvtabFilter(
     const char *zFromColumn = pVtab->zFromColumn;
     const char *zToColumn = pVtab->zToColumn;
     bfsvtab_node *root;
+    bfsvtab_avl *rootAvlNode;
 
     (void)idxStr;
     (void)argc;
@@ -779,6 +776,7 @@ static int bfsvtabFilter(
     if (root == 0) {
         return SQLITE_NOMEM;
     }
+    memset(root, 0, sizeof(*root));
     root->distance = 0;
     root->id = sqlite3_value_int64(argv[0]);
     queuePush(&pCur->pQueue, root);
@@ -786,7 +784,14 @@ static int bfsvtabFilter(
     pCur->pCurrent = 0;
     pCur->root = root->id;
 
-    // TOOD: Fix
+    rootAvlNode = sqlite3_malloc(sizeof(*rootAvlNode));
+    if (rootAvlNode == 0) {
+        return SQLITE_NOMEM;
+    }
+    memset(rootAvlNode, 0, sizeof(*rootAvlNode));
+    rootAvlNode->id = root->id;
+    pCur->pVisited = rootAvlNode;
+
     return bfsvtabNext(pVtabCursor);
 }
 
