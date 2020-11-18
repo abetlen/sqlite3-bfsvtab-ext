@@ -602,25 +602,12 @@ static int bfsvtabNext(sqlite3_vtab_cursor *cur) {
     int rc;
     bfsvtab_avl *newAvlNode;
     bfsvtab_cursor *pCur = (bfsvtab_cursor*)cur;
+    if (pCur->pCurrent) {
+        sqlite3_free(pCur->pCurrent);
+    }
     pCur->pCurrent = queuePull(&pCur->pQueue);
     if (pCur->pCurrent == 0) {
         return SQLITE_OK;
-    }
-    newAvlNode = sqlite3_malloc(sizeof(*newAvlNode));
-    if (newAvlNode == 0) {
-        return SQLITE_NOMEM;
-    }
-    memset(newAvlNode, 0, sizeof(*newAvlNode));
-    newAvlNode->id = pCur->pCurrent->id;
-    newAvlNode->parent = pCur->pCurrent->parent;
-    bfsvtabAvlInsert(&pCur->pVisited, newAvlNode);
-    rc = sqlite3_clear_bindings(pCur->pStmt);
-    if (rc) {
-        return rc;
-    }
-    rc = sqlite3_reset(pCur->pStmt);
-    if (rc) {
-        return rc;
     }
     rc = sqlite3_bind_int64(pCur->pStmt, 1, pCur->pCurrent->id);
     if (rc) {
@@ -651,6 +638,14 @@ static int bfsvtabNext(sqlite3_vtab_cursor *cur) {
             newAvlNode->parent = pCur->pCurrent->id;
             bfsvtabAvlInsert(&pCur->pVisited, newAvlNode);
         }
+    }
+    rc = sqlite3_clear_bindings(pCur->pStmt);
+    if (rc) {
+        return rc;
+    }
+    rc = sqlite3_reset(pCur->pStmt);
+    if (rc) {
+        return rc;
     }
     return rc;
 }
@@ -689,6 +684,7 @@ static int bfsvtabColumn(
 ) {
     int rc;
     sqlite3_str *s;
+    char *c;
     bfsvtab_cursor *pCur = (bfsvtab_cursor*)cur;
     switch (i) {
         case BFSVTAB_COL_ID:
@@ -716,8 +712,9 @@ static int bfsvtabColumn(
                 sqlite3_str_finish(s);
                 return rc;
             }
-            sqlite3_result_text(ctx, sqlite3_str_value(s), -1, SQLITE_TRANSIENT);
-            sqlite3_str_finish(s);
+            c = sqlite3_str_finish(s);
+            sqlite3_result_text(ctx, c, -1, SQLITE_TRANSIENT);
+            sqlite3_free(c);
             break;
         case BFSVTAB_COL_ROOT:
             sqlite3_result_int(ctx, pCur->root);
@@ -783,6 +780,7 @@ static int bfsvtabFilter(
     const char *zFromColumn = pVtab->zFromColumn;
     const char *zToColumn = pVtab->zToColumn;
     bfsvtab_node *root;
+    bfsvtab_avl *rootAvlNode;
 
     (void)idxStr;
     (void)argc;
@@ -823,6 +821,7 @@ static int bfsvtabFilter(
     if (root == 0) {
         return SQLITE_NOMEM;
     }
+    memset(root, 0, sizeof(*root));
     root->distance = 0;
     root->id = sqlite3_value_int64(argv[0]);
     root->parent = root->id;
@@ -831,7 +830,15 @@ static int bfsvtabFilter(
     pCur->pCurrent = 0;
     pCur->root = root->id;
 
-    // TOOD: Fix
+    rootAvlNode = sqlite3_malloc(sizeof(*rootAvlNode));
+    if (rootAvlNode == 0) {
+        return SQLITE_NOMEM;
+    }
+    memset(rootAvlNode, 0, sizeof(*rootAvlNode));
+    rootAvlNode->id = root->id;
+    rootAvlNode->parent = root->id;
+    pCur->pVisited = rootAvlNode;
+
     return bfsvtabNext(pVtabCursor);
 }
 
