@@ -1,6 +1,6 @@
 # bfsvtab: Breadth First Search Virtual Table Extension for Sqlite3
 
-This extension allows Sqlite3 to perform a breadth first search queries against graph data.
+This extension allows Sqlite3 to perform breadth first search queries against graph data.
 
 **Can't you do this with recursive common table expressions (RCTEs)?**
 
