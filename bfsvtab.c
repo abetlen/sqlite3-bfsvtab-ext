@@ -518,7 +518,7 @@ static int bfsvtabConnect(
     }
 
     rc = sqlite3_declare_vtab(db,
-       "CREATE TABLE x(id,parent,distance,path,root HIDDEN,"
+       "CREATE TABLE x(id,parent,distance,shortest_path,root HIDDEN,"
                        "tablename HIDDEN,fromcolumn HIDDEN,"
                        "tocolumn HIDDEN)"
     );
@@ -526,7 +526,7 @@ static int bfsvtabConnect(
 #define BFSVTAB_COL_ID              0
 #define BFSVTAB_COL_PARENT          1
 #define BFSVTAB_COL_DISTANCE        2
-#define BFSVTAB_COL_PATH            3
+#define BFSVTAB_COL_SHORTEST_PATH   3
 #define BFSVTAB_COL_ROOT            4
 #define BFSVTAB_COL_TABLENAME       5
 #define BFSVTAB_COL_FROMCOLUMN      6
@@ -658,14 +658,14 @@ static int bfsvtabNext(sqlite3_vtab_cursor *cur) {
 /*
 ** Recursively builds a node path string.
 */
-int bfsvtabBuildPathStr(sqlite3_str *str, bfsvtab_avl *visited, sqlite3_int64 id) {
+int bfsvtabBuildShortestPathStr(sqlite3_str *str, bfsvtab_avl *visited, sqlite3_int64 id) {
     int rc;
     bfsvtab_avl *node = bfsvtabAvlSearch(visited, id);
     if (node == 0) {
         return SQLITE_OK;
     }
     if (node->parent != id) {
-        rc = bfsvtabBuildPathStr(str, visited, node->parent);
+        rc = bfsvtabBuildShortestPathStr(str, visited, node->parent);
         if (rc != SQLITE_OK) {
             return rc;
         }
@@ -704,14 +704,14 @@ static int bfsvtabColumn(
         case BFSVTAB_COL_DISTANCE:
             sqlite3_result_int(ctx, pCur->pCurrent->distance);
             break;
-        case BFSVTAB_COL_PATH:
+        case BFSVTAB_COL_SHORTEST_PATH:
             s = sqlite3_str_new(pCur->pVtab->db);
             rc = sqlite3_str_errcode(s);
             if (rc != SQLITE_OK) {
                 sqlite3_str_finish(s);
                 return rc;
             }
-            rc = bfsvtabBuildPathStr(s, pCur->pVisited, pCur->pCurrent->id);
+            rc = bfsvtabBuildShortestPathStr(s, pCur->pVisited, pCur->pCurrent->id);
             if (rc != SQLITE_OK) {
                 sqlite3_str_finish(s);
                 return rc;
