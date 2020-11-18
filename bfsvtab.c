@@ -56,6 +56,7 @@ typedef struct bfsvtab_queue bfsvtab_queue;
 */
 struct bfsvtab_avl {
     sqlite3_int64 id;     /* Id of this entry in the table */
+    sqlite3_int64 parent; /* Id of this nodes parent. parent_id == id for root node */
     bfsvtab_avl *pBefore; /* Other elements less than id */
     bfsvtab_avl *pAfter;  /* Other elements greater than id */
     bfsvtab_avl *pUp;     /* Parent element */
@@ -517,7 +518,7 @@ static int bfsvtabConnect(
     }
 
     rc = sqlite3_declare_vtab(db,
-       "CREATE TABLE x(id,parent,distance,root HIDDEN,"
+       "CREATE TABLE x(id,parent,distance,path,root HIDDEN,"
                        "tablename HIDDEN,fromcolumn HIDDEN,"
                        "tocolumn HIDDEN)"
     );
@@ -525,10 +526,11 @@ static int bfsvtabConnect(
 #define BFSVTAB_COL_ID              0
 #define BFSVTAB_COL_PARENT          1
 #define BFSVTAB_COL_DISTANCE        2
-#define BFSVTAB_COL_ROOT            3
-#define BFSVTAB_COL_TABLENAME       4
-#define BFSVTAB_COL_FROMCOLUMN      5
-#define BFSVTAB_COL_TOCOLUMN        6
+#define BFSVTAB_COL_PATH            3
+#define BFSVTAB_COL_ROOT            4
+#define BFSVTAB_COL_TABLENAME       5
+#define BFSVTAB_COL_FROMCOLUMN      6
+#define BFSVTAB_COL_TOCOLUMN        7
     if (rc != SQLITE_OK) {
         bfsvtabFree(pNew);
     }
@@ -610,6 +612,7 @@ static int bfsvtabNext(sqlite3_vtab_cursor *cur) {
     }
     memset(newAvlNode, 0, sizeof(*newAvlNode));
     newAvlNode->id = pCur->pCurrent->id;
+    newAvlNode->parent = pCur->pCurrent->parent;
     bfsvtabAvlInsert(&pCur->pVisited, newAvlNode);
     rc = sqlite3_clear_bindings(pCur->pStmt);
     if (rc) {
@@ -645,9 +648,33 @@ static int bfsvtabNext(sqlite3_vtab_cursor *cur) {
             }
             memset(newAvlNode, 0, sizeof(*newAvlNode));
             newAvlNode->id = iNew;
+            newAvlNode->parent = pCur->pCurrent->id;
             bfsvtabAvlInsert(&pCur->pVisited, newAvlNode);
         }
     }
+    return rc;
+}
+
+/*
+** Recursively builds a node path string.
+*/
+int bfsvtabBuildPathStr(sqlite3_str *str, bfsvtab_avl *visited, sqlite3_int64 id) {
+    int rc;
+    bfsvtab_avl *node = bfsvtabAvlSearch(visited, id);
+    if (node == 0) {
+        return SQLITE_OK;
+    }
+    if (node->parent != id) {
+        rc = bfsvtabBuildPathStr(str, visited, node->parent);
+        if (rc != SQLITE_OK) {
+            return rc;
+        }
+        sqlite3_str_appendf(str, "%d/", id);
+        rc = sqlite3_str_errcode(str);
+        return rc;
+    }
+    sqlite3_str_appendf(str, "/%d/", id);
+    rc = sqlite3_str_errcode(str);
     return rc;
 }
 
@@ -674,6 +701,25 @@ static int bfsvtabColumn(
             break;
         case BFSVTAB_COL_DISTANCE:
             sqlite3_result_int(ctx, pCur->pCurrent->distance);
+            break;
+        case BFSVTAB_COL_PATH:
+            if (pCur->pCurrent->id == pCur->root) {
+                sqlite3_result_null(ctx);
+            } else {
+                sqlite3_str *s = sqlite3_str_new(pCur->pVtab->db);
+                int rc = sqlite3_str_errcode(s);
+                if (rc != SQLITE_OK) {
+                    sqlite3_str_finish(s);
+                    return rc;
+                }
+                rc = bfsvtabBuildPathStr(s, pCur->pVisited, pCur->pCurrent->id);
+                if (rc != SQLITE_OK) {
+                    sqlite3_str_finish(s);
+                    return rc;
+                }
+                sqlite3_result_text(ctx, sqlite3_str_value(s), -1, SQLITE_TRANSIENT);
+                sqlite3_str_finish(s);
+            }
             break;
         case BFSVTAB_COL_ROOT:
             sqlite3_result_int(ctx, pCur->root);
@@ -781,6 +827,7 @@ static int bfsvtabFilter(
     }
     root->distance = 0;
     root->id = sqlite3_value_int64(argv[0]);
+    root->parent = root->id;
     queuePush(&pCur->pQueue, root);
 
     pCur->pCurrent = 0;
