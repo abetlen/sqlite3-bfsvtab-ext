@@ -687,6 +687,8 @@ static int bfsvtabColumn(
     sqlite3_context *ctx,       /* First argument to sqlite3_result_...() */
     int i                       /* Which column to return */
 ) {
+    int rc;
+    sqlite3_str *s;
     bfsvtab_cursor *pCur = (bfsvtab_cursor*)cur;
     switch (i) {
         case BFSVTAB_COL_ID:
@@ -703,23 +705,19 @@ static int bfsvtabColumn(
             sqlite3_result_int(ctx, pCur->pCurrent->distance);
             break;
         case BFSVTAB_COL_PATH:
-            if (pCur->pCurrent->id == pCur->root) {
-                sqlite3_result_null(ctx);
-            } else {
-                sqlite3_str *s = sqlite3_str_new(pCur->pVtab->db);
-                int rc = sqlite3_str_errcode(s);
-                if (rc != SQLITE_OK) {
-                    sqlite3_str_finish(s);
-                    return rc;
-                }
-                rc = bfsvtabBuildPathStr(s, pCur->pVisited, pCur->pCurrent->id);
-                if (rc != SQLITE_OK) {
-                    sqlite3_str_finish(s);
-                    return rc;
-                }
-                sqlite3_result_text(ctx, sqlite3_str_value(s), -1, SQLITE_TRANSIENT);
+            s = sqlite3_str_new(pCur->pVtab->db);
+            rc = sqlite3_str_errcode(s);
+            if (rc != SQLITE_OK) {
                 sqlite3_str_finish(s);
+                return rc;
             }
+            rc = bfsvtabBuildPathStr(s, pCur->pVisited, pCur->pCurrent->id);
+            if (rc != SQLITE_OK) {
+                sqlite3_str_finish(s);
+                return rc;
+            }
+            sqlite3_result_text(ctx, sqlite3_str_value(s), -1, SQLITE_TRANSIENT);
+            sqlite3_str_finish(s);
             break;
         case BFSVTAB_COL_ROOT:
             sqlite3_result_int(ctx, pCur->root);
