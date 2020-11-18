@@ -20,6 +20,7 @@ The virtual table also provides the following columns that can be returned or us
 - `id`: The id of the current node being visited.
 - `distance`: The shortest distance to the current node from the root node.
 - `parent`: The id of the parent node to the current node in the spanning tree rooted at the root node.
+- `path`: Slash delimited string containing the shortest path from the root to the given node.
 
 Check out the examples below for more details.
 
@@ -49,6 +50,17 @@ insert into edges(fromNode, toNode) values
 /* Find the minimum distance from node 1 to node 4 */
 select 
   id, distance 
+  from bfsvtab 
+  where 
+    tablename  = 'edges'    and
+    fromcolumn = 'fromNode' and
+    tocolumn   = 'toNode'   and
+    root       = 1          and
+    id         = 4;
+
+/* Find the shortest path from node 1 to node 4 */
+select 
+  path
   from bfsvtab 
   where 
     tablename  = 'edges'    and
