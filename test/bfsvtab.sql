@@ -5,4 +5,4 @@ create virtual table bfs using bfsvtab(
   fromcolumn='fromNode',
   tocolumn='toNode',
 );
-select id, parent, distance from bfs where root = 1;
+select id, parent, shortest_path, distance from bfs where root = 1;

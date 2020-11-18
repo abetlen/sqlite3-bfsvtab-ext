@@ -7,9 +7,11 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v2
+      - name: Install valgrind
+        run: sudo apt-get install valgrind
       - name: Make Extension
         run: make
       - name: Test Extension
