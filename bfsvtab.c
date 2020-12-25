@@ -10,8 +10,9 @@
 **
 *************************************************************************
 **
-** This file code for a virtual table that performs a breadth-first search of
-** any graph represented in a real table. The virtual table is called "bfs".
+** This file contains code for a virtual table that performs a breadth-first 
+** search of any graph represented in a real or virtual table.
+** The virtual table is called "bfsvtab".
 **
 ** A bfsvtab virtual table is created liske this:
 **
@@ -21,7 +22,7 @@
 **        tocolumn=<columname>,
 **     )
 **
-** This bfs is minimal, in the sense that it uses only the required
+** This bfsvtab extension is minimal, in the sense that it uses only the required
 ** methods on the sqlite3_module object.  As a result, bfsvtab is
 ** a read-only and eponymous-only table.  Those limitation can be removed
 ** by adding new methods.
