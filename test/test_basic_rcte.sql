@@ -1,4 +1,4 @@
-.read ./test/fixture.sql
+.read ./test/test_basic_fixture.sql
 with recursive
     bfs(id, parent, shortest_path, distance) as (
         select 1, null, '/' || 1 || '/',  0

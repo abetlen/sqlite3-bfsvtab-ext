@@ -18,6 +18,9 @@ The virtual table requires 4 SQL constraints to be set for all queries:
 - `tocolumn`: The node id column where an edge goes to (must be integer).
 - `root`: The root node id of the breadth-first traversal.
 
+As well as an optional constraint to determine the order of node neighbour traversal.
+- `order_by_column`: The name of the column used to determine the order of node neighbour traversal. Adjacent edges are traversed in descending order.
+
 The virtual table also provides the following columns that can be returned or used as contraints:
 - `id`: The id of the current node being visited.
 - `distance`: The shortest distance to the current node from the root node.

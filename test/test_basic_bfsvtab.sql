@@ -1,5 +1,5 @@
 .load ./bfsvtab
-.read ./test/fixture.sql
+.read ./test/test_basic_fixture.sql
 create virtual table bfs using bfsvtab(
   tablename='edges',
   fromcolumn='fromNode',

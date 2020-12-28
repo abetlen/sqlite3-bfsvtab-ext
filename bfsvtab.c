@@ -10,8 +10,9 @@
 **
 *************************************************************************
 **
-** This file code for a virtual table that performs a breadth-first search of
-** any graph represented in a real table. The virtual table is called "bfs".
+** This file contains code for a virtual table that performs a breadth-first 
+** search of any graph represented in a real or virtual table.
+** The virtual table is called "bfsvtab".
 **
 ** A bfsvtab virtual table is created liske this:
 **
@@ -21,7 +22,7 @@
 **        tocolumn=<columname>,
 **     )
 **
-** This bfs is minimal, in the sense that it uses only the required
+** This bfsvtab extension is minimal, in the sense that it uses only the required
 ** methods on the sqlite3_module object.  As a result, bfsvtab is
 ** a read-only and eponymous-only table.  Those limitation can be removed
 ** by adding new methods.
@@ -390,6 +391,8 @@ struct bfsvtab_vtab {
     char *zTableName;
     char *zFromColumn;
     char *zToColumn;
+    char *zOrderByColumn;
+
     sqlite3 *db;
 };
 
@@ -409,6 +412,7 @@ struct bfsvtab_cursor {
     char *zTableName;          /* Name of table holding edge relation */
     char *zFromColumn;         /* Name of from column of zTableName */
     char *zToColumn;           /* Name of to column of zTableName */
+    char *zOrderByColumn;      /* Name of column to order neighbours by during BFS traversal */
 
     bfsvtab_avl *pVisited;     /* Set of Visited Nodes */
 
@@ -428,6 +432,7 @@ static void bfsvtabFree(bfsvtab_vtab *p) {
         sqlite3_free(p->zTableName);
         sqlite3_free(p->zFromColumn);
         sqlite3_free(p->zToColumn);
+        sqlite3_free(p->zOrderByColumn);
         memset(p, 0, sizeof(*p));
         sqlite3_free(p);
     }
@@ -512,6 +517,17 @@ static int bfsvtabConnect(
             }
             continue;
         }
+        zVal = bfsvtabValueOfKey("order_by_column", argv[i]);
+        if (zVal) {
+            sqlite3_free(pNew->zOrderByColumn);
+            pNew->zOrderByColumn = bfsvtabDequote(zVal);
+            if (pNew->zOrderByColumn == 0) {
+                rc = SQLITE_NOMEM;
+                goto connectError;
+            }
+            continue;
+        }
+
         *pzErr = sqlite3_mprintf("unrecognized argument: [%s]\n", argv[i]);
         bfsvtabFree(pNew);
         return SQLITE_ERROR;
@@ -520,7 +536,7 @@ static int bfsvtabConnect(
     rc = sqlite3_declare_vtab(db,
        "CREATE TABLE x(id,parent,distance,shortest_path,root HIDDEN,"
                        "tablename HIDDEN,fromcolumn HIDDEN,"
-                       "tocolumn HIDDEN)"
+                       "tocolumn HIDDEN, order_by_column HIDDEN)"
     );
     /* For convenience, define symbolic names for the index to each column. */
 #define BFSVTAB_COL_ID              0
@@ -531,6 +547,7 @@ static int bfsvtabConnect(
 #define BFSVTAB_COL_TABLENAME       5
 #define BFSVTAB_COL_FROMCOLUMN      6
 #define BFSVTAB_COL_TOCOLUMN        7
+#define BFSVTAB_COL_ORDER_BY_COLUMN 8
     if (rc != SQLITE_OK) {
         bfsvtabFree(pNew);
     }
@@ -575,12 +592,14 @@ static void bfsvtabClearCursor(bfsvtab_cursor *pCur) {
   sqlite3_free(pCur->zTableName);
   sqlite3_free(pCur->zFromColumn);
   sqlite3_free(pCur->zToColumn);
+  sqlite3_free(pCur->zOrderByColumn);
 
   sqlite3_finalize(pCur->pStmt);
 
   pCur->zTableName = 0;
   pCur->zFromColumn = 0;
   pCur->zToColumn = 0;
+  pCur->zOrderByColumn = 0;
   pCur->pCurrent = 0;
   pCur->pVisited = 0;
 }
@@ -731,11 +750,17 @@ static int bfsvtabColumn(
                         pCur->zFromColumn : pCur->pVtab->zFromColumn,
                     -1, SQLITE_TRANSIENT);
             break;
-        default:
-            assert( i==BFSVTAB_COL_TOCOLUMN );
+        case BFSVTAB_COL_TOCOLUMN:
             sqlite3_result_text(ctx,
                     pCur->zToColumn ?
                         pCur->zToColumn : pCur->pVtab->zToColumn,
+                    -1, SQLITE_TRANSIENT);
+            break;
+        default:
+            assert( i==BFSVTAB_COL_ORDER_BY_COLUMN );
+            sqlite3_result_text(ctx,
+                    pCur->zOrderByColumn ?
+                        pCur->zOrderByColumn : pCur->pVtab->zOrderByColumn,
                     -1, SQLITE_TRANSIENT);
             break;
     }
@@ -779,6 +804,7 @@ static int bfsvtabFilter(
     const char *zTableName = pVtab->zTableName;
     const char *zFromColumn = pVtab->zFromColumn;
     const char *zToColumn = pVtab->zToColumn;
+    const char *zOrderByColumn = pVtab->zOrderByColumn;
     bfsvtab_node *root;
     bfsvtab_avl *rootAvlNode;
 
@@ -801,10 +827,20 @@ static int bfsvtabFilter(
         zToColumn = (const char*)sqlite3_value_text(argv[(idxNum>>16)&0x0f]);
         pCur->zToColumn = sqlite3_mprintf("%s", zToColumn);
     }
+    if((idxNum & 0xf00000) != 0) {
+        zOrderByColumn = (const char*)sqlite3_value_text(argv[(idxNum>>20)&0x0f]);
+        pCur->zOrderByColumn = sqlite3_mprintf("%s", zOrderByColumn);
+    }
 
-    zSql = sqlite3_mprintf(
-        "SELECT \"%w\".\"%w\" FROM \"%w\" WHERE \"%w\".\"%w\"=?1",
-        zTableName, zToColumn, zTableName, zTableName, zFromColumn);
+    if (zOrderByColumn) {
+        zSql = sqlite3_mprintf(
+            "SELECT \"%w\".\"%w\" FROM \"%w\" WHERE \"%w\".\"%w\"=?1 ORDER BY \"%w\".\"%w\"",
+            zTableName, zToColumn, zTableName, zTableName, zFromColumn, zTableName, zOrderByColumn);
+    } else {
+        zSql = sqlite3_mprintf(
+            "SELECT \"%w\".\"%w\" FROM \"%w\" WHERE \"%w\".\"%w\"=?1",
+            zTableName, zToColumn, zTableName, zTableName, zFromColumn);
+    }
     if (zSql == 0) {
         return SQLITE_NOMEM;
     }
@@ -934,6 +970,14 @@ static int bfsvtabBestIndex(
             && pConstraint->op == SQLITE_INDEX_CONSTRAINT_EQ
             ) {
             iPlan |= idx<<16;
+            pIdxInfo->aConstraintUsage[i].argvIndex = ++idx;
+            pIdxInfo->aConstraintUsage[i].omit = 1;
+        }
+        if ((iPlan & 0xf00000) == 0
+            && pConstraint->iColumn == BFSVTAB_COL_ORDER_BY_COLUMN
+            && pConstraint->op == SQLITE_INDEX_CONSTRAINT_EQ
+            ) {
+            iPlan |= idx<<20;
             pIdxInfo->aConstraintUsage[i].argvIndex = ++idx;
             pIdxInfo->aConstraintUsage[i].omit = 1;
         }
