@@ -9,5 +9,6 @@ with recursive
         order by 2
     )
 select id, parent, shortest_path, min(distance) as distance from bfs
+where distance <= 2
 group by id
 order by distance;

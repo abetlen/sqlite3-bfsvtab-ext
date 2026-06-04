@@ -270,6 +270,11 @@ struct bfsvtab_queue {
   bfsvtab_node *pLast;        /* Youngest node on the queue */
 };
 
+#define BFSVTAB_DEPTH_NONE 0   /* No distance constraint */
+#define BFSVTAB_DEPTH_LT   1   /* distance < nDepthLimit */
+#define BFSVTAB_DEPTH_LE   2   /* distance <= nDepthLimit */
+#define BFSVTAB_DEPTH_EQ   3   /* distance == nDepthLimit */
+
 /*
 ** Add a node to the end of the queue
 */
@@ -415,6 +420,8 @@ struct bfsvtab_cursor {
     bfsvtab_queue pQueue;      /* Queue of next Nodes */
     bfsvtab_node *pCurrent;     /* Current element of output */
     sqlite3_int64 root;
+    sqlite3_int64 nDepthLimit;
+    int eDepth;
 
 };
 
@@ -583,6 +590,8 @@ static void bfsvtabClearCursor(bfsvtab_cursor *pCur) {
   pCur->zToColumn = 0;
   pCur->pCurrent = 0;
   pCur->pVisited = 0;
+  pCur->nDepthLimit = 0;
+  pCur->eDepth = BFSVTAB_DEPTH_NONE;
 }
 
 /*
@@ -598,56 +607,88 @@ static int bfsvtabClose(sqlite3_vtab_cursor *cur) {
 /*
 ** Advance a bfsvtab_cursor to its next row of output.
 */
+static int bfsvtabDepthMatchesCursor(bfsvtab_cursor *pCur, sqlite3_int64 distance){
+    switch (pCur->eDepth) {
+        case BFSVTAB_DEPTH_LT:
+            return distance < pCur->nDepthLimit;
+        case BFSVTAB_DEPTH_LE:
+            return distance <= pCur->nDepthLimit;
+        case BFSVTAB_DEPTH_EQ:
+            return distance == pCur->nDepthLimit;
+        default:
+            return 1;
+    }
+}
+
+static int bfsvtabCanExpandFromCursor(bfsvtab_cursor *pCur, sqlite3_int64 distance){
+    if (pCur->eDepth == BFSVTAB_DEPTH_NONE) {
+        return 1;
+    }
+    if (pCur->eDepth == BFSVTAB_DEPTH_LT) {
+        return (pCur->nDepthLimit > 0) && (distance < pCur->nDepthLimit - 1);
+    }
+    return distance < pCur->nDepthLimit;
+}
+
 static int bfsvtabNext(sqlite3_vtab_cursor *cur) {
     int rc;
     bfsvtab_avl *newAvlNode;
     bfsvtab_cursor *pCur = (bfsvtab_cursor*)cur;
-    if (pCur->pCurrent) {
-        sqlite3_free(pCur->pCurrent);
-    }
-    pCur->pCurrent = queuePull(&pCur->pQueue);
-    if (pCur->pCurrent == 0) {
-        return SQLITE_OK;
-    }
-    rc = sqlite3_bind_int64(pCur->pStmt, 1, pCur->pCurrent->id);
-    if (rc) {
-        return rc;
-    }
-    while (rc == SQLITE_OK && sqlite3_step(pCur->pStmt) == SQLITE_ROW) {
-        if (sqlite3_column_type(pCur->pStmt, 0) == SQLITE_INTEGER) {
-            sqlite3_int64 iNew = sqlite3_column_int64(pCur->pStmt, 0);
-            if (bfsvtabAvlSearch(pCur->pVisited, iNew) != 0) {
-                continue;
-            }
-            bfsvtab_node *node = sqlite3_malloc(sizeof(*node));
-            if (node == 0) {
-                return SQLITE_NOMEM;
-            }
-            memset(node, 0, sizeof(*node));
-            node->id = iNew;
-            node->parent = pCur->pCurrent->id;
-            node->distance = pCur->pCurrent->distance + 1;
-            queuePush(&pCur->pQueue, node);
+    while (1) {
+        if (pCur->pCurrent) {
+            sqlite3_free(pCur->pCurrent);
+            pCur->pCurrent = 0;
+        }
+        pCur->pCurrent = queuePull(&pCur->pQueue);
+        if (pCur->pCurrent == 0) {
+            return SQLITE_OK;
+        }
 
-            newAvlNode = sqlite3_malloc(sizeof(*newAvlNode));
-            if (newAvlNode == 0) {
-                return SQLITE_NOMEM;
+        if (bfsvtabCanExpandFromCursor(pCur, pCur->pCurrent->distance)) {
+            rc = sqlite3_bind_int64(pCur->pStmt, 1, pCur->pCurrent->id);
+            if (rc) {
+                return rc;
             }
-            memset(newAvlNode, 0, sizeof(*newAvlNode));
-            newAvlNode->id = iNew;
-            newAvlNode->parent = pCur->pCurrent->id;
-            bfsvtabAvlInsert(&pCur->pVisited, newAvlNode);
+            while (rc == SQLITE_OK && sqlite3_step(pCur->pStmt) == SQLITE_ROW) {
+                if (sqlite3_column_type(pCur->pStmt, 0) == SQLITE_INTEGER) {
+                    sqlite3_int64 iNew = sqlite3_column_int64(pCur->pStmt, 0);
+                    if (bfsvtabAvlSearch(pCur->pVisited, iNew) != 0) {
+                        continue;
+                    }
+                    bfsvtab_node *node = sqlite3_malloc(sizeof(*node));
+                    if (node == 0) {
+                        return SQLITE_NOMEM;
+                    }
+                    memset(node, 0, sizeof(*node));
+                    node->id = iNew;
+                    node->parent = pCur->pCurrent->id;
+                    node->distance = pCur->pCurrent->distance + 1;
+                    queuePush(&pCur->pQueue, node);
+
+                    newAvlNode = sqlite3_malloc(sizeof(*newAvlNode));
+                    if (newAvlNode == 0) {
+                        return SQLITE_NOMEM;
+                    }
+                    memset(newAvlNode, 0, sizeof(*newAvlNode));
+                    newAvlNode->id = iNew;
+                    newAvlNode->parent = pCur->pCurrent->id;
+                    bfsvtabAvlInsert(&pCur->pVisited, newAvlNode);
+                }
+            }
+            rc = sqlite3_clear_bindings(pCur->pStmt);
+            if (rc) {
+                return rc;
+            }
+            rc = sqlite3_reset(pCur->pStmt);
+            if (rc) {
+                return rc;
+            }
+        }
+
+        if (bfsvtabDepthMatchesCursor(pCur, pCur->pCurrent->distance)) {
+            return SQLITE_OK;
         }
     }
-    rc = sqlite3_clear_bindings(pCur->pStmt);
-    if (rc) {
-        return rc;
-    }
-    rc = sqlite3_reset(pCur->pStmt);
-    if (rc) {
-        return rc;
-    }
-    return rc;
 }
 
 /*
@@ -789,6 +830,18 @@ static int bfsvtabFilter(
         /* No root=$root in the WHERE clause.  Return an empty set */
         return SQLITE_OK;
     }
+    if ((idxNum & 0x00000f0) != 0) {
+        pCur->nDepthLimit = sqlite3_value_int64(argv[(idxNum>>4)&0x0f]);
+        if ((idxNum & 0x00000002) != 0) {
+            pCur->eDepth = BFSVTAB_DEPTH_LT;
+        } else if ((idxNum & 0x00000004) != 0) {
+            pCur->eDepth = BFSVTAB_DEPTH_EQ;
+        } else {
+            pCur->eDepth = BFSVTAB_DEPTH_LE;
+        }
+    } else {
+        pCur->eDepth = BFSVTAB_DEPTH_NONE;
+    }
     if( (idxNum & 0x00f00) != 0) {
         zTableName = (const char*)sqlite3_value_text(argv[(idxNum>>8)&0x0f]);
         pCur->zTableName = sqlite3_mprintf("%s", zTableName);
@@ -864,7 +917,9 @@ static int bfsvtabFilter(
 **   idxNum       meaning
 **   ----------   ------------------------------------------------------
 **   0x00000001   Term of the form (A) found
-**   0x00000002   The term of bit-2 is like (B1)
+**   0x00000002   The term is of type (B1), ie distance < $distance
+**   0x00000004   The term is of type (B3), ie distance = $distance
+**                 For (B2), both bits are unset.
 **   0x000000f0   Index in filter.argv[] of $depth.  0 if not used.
 **   0x00000f00   Index in filter.argv[] of $tablename.  0 if not used.
 **   0x0000f000   Index in filter.argv[] of $idcolumn.  0 if not used
@@ -908,6 +963,7 @@ static int bfsvtabBestIndex(
             iPlan |= idx<<4;
             pIdxInfo->aConstraintUsage[i].argvIndex = ++idx;
             if( pConstraint->op==SQLITE_INDEX_CONSTRAINT_LT ) iPlan |= 0x000002;
+            if( pConstraint->op==SQLITE_INDEX_CONSTRAINT_EQ ) iPlan |= 0x000004;
             rCost /= 5.0;
         }
         if ((iPlan & 0x000f00) == 0
